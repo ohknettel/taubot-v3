@@ -1,9 +1,8 @@
 package database
 
 import (
-	"github.com/google/uuid"
 	"time"
-	"gorm.io/gorm"
+	"github.com/ohknettel/taubot-v3/pkg/datatypes"
 )
 
 const (
@@ -62,21 +61,21 @@ var Models []any = []any{
 
 type Economy struct {
 	Name 			string
-	ID 				string 		`gorm:"primaryKey"`
+	ID 				datatypes.UUID 	`gorm:"primaryKey"`
 	ParentGuildID 	string
 
-	CurrencyName 	string 		`gorm:"unique"`
+	CurrencyName 	string 			`gorm:"unique"`
 	CurrencyUnit 	string
 
-	Guilds 			[]Guild 	`gorm:"foreignKey:EconomyID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
-	Accounts 		[]Account 	`gorm:"foreignKey:EconomyID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-	Plugins 		[]Plugin 	`gorm:"foreignKey:EconomyID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	Guilds 			[]Guild
+	Accounts 		[]Account
+	Plugins 		[]Plugin
 }
 
 type Guild struct {
-	ID			uint 	`gorm:"primaryKey"`
+	ID			uint 			`gorm:"primaryKey"`
 	GuildID 	string	
-	EconomyID 	string 	`gorm:"index"`
+	EconomyID 	datatypes.UUID 	`gorm:"index"`
 	Economy 	Economy
 }
 
@@ -86,7 +85,7 @@ type MinecraftIntegration struct {
 }
 
 type Plugin struct {
-	ID 			string 			`gorm:"primaryKey"`
+	ID 			datatypes.UUID 	`gorm:"primaryKey"`
 	PluginName 	string
 	PluginLogo 	*string
 
@@ -97,7 +96,7 @@ type Plugin struct {
 }
 
 type Account struct {
-	ID 				string 	`gorm:"primaryKey"`
+	ID 				datatypes.UUID 	`gorm:"primaryKey"`
 	AccountName 	string
 	AccountType 	uint8
 	AccountLogo 	*string
@@ -105,16 +104,16 @@ type Account struct {
 
 	Balance 		uint
 	TotalBalance 	uint
-	Deleted 		bool 	`gorm:"default:false"`
+	Deleted 		bool 			`gorm:"default:false"`
 
-	EconomyID 		string 	`gorm:"index"`
+	EconomyID 		string 			`gorm:"index"`
 	Economy 		Economy
 }
 
 type PluginLink struct {
 	ID			uint 	`gorm:"primaryKey"`
-	PluginID 	string 
-	AccountID 	string
+	PluginID 	datatypes.UUID 
+	AccountID 	datatypes.UUID
 	Enabled 	bool
 }
 
@@ -123,21 +122,21 @@ type Transfer struct {
 	ActorID 		string
 	CreatedAt 		time.Time
 
-	FromAccountID 	uint8
+	FromAccountID 	datatypes.UUID
 	FromAccount		Account
 
-	ToAccountID		uint8
+	ToAccountID		datatypes.UUID
 	ToAccount		Account
 }
 
 type UserPermission struct {
-	EntryID 	string 	`gorm:"primaryKey"`
-	UserID 		string 	`gorm:"index"`
+	EntryID 	string 			`gorm:"primaryKey"`
+	UserID 		string 			`gorm:"index"`
 
-	AccountID 	*string	`gorm:"index"`
+	AccountID 	*datatypes.UUID	`gorm:"index"`
 	Account 	*Account 
 
-	EconomyID 	*string	`gorm:"index"`
+	EconomyID 	*datatypes.UUID	`gorm:"index"`
 	Economy 	*Economy 
 
 	PermissionID uint8
@@ -153,18 +152,18 @@ type Tax struct {
 	BracketEnd 		uint
 	Rate 			uint
 
-	ToAccountID 	string
+	ToAccountID 	datatypes.UUID
 	ToAccount 		Account `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 type RecurringTransfer struct {
-	EntryID 		string 	`gorm:"primaryKey"`
+	EntryID 		string 			`gorm:"primaryKey"`
 	ActorID 		string
 
-	FromAccountID 	string 	`gorm:"index"`
-	FromAccount 	Account `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-	ToAccountID 	string 	`gorm:"index"`
-	ToAccount 		Account `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	FromAccountID 	datatypes.UUID 	`gorm:"index"`
+	FromAccount 	Account 		`gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ToAccountID 	datatypes.UUID 	`gorm:"index"`
+	ToAccount 		Account 		`gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 
 	Amount 			uint
 	LastPaid 		time.Time
@@ -182,19 +181,4 @@ func (UserPermission) TableName() string {
 
 func (Tax) TableName() string {
 	return "taxes"
-}
-
-func (e *Economy) BeforeCreate(tx *gorm.DB) (err error) {
-	e.ID = uuid.New().String()
-	return
-}
-
-func (a *Account) BeforeCreate(tx *gorm.DB) (err error) {
-	a.ID = uuid.New().String()
-	return
-}
-
-func (p *Plugin) BeforeCreate(tx *gorm.DB) (err error) {
-	p.ID = uuid.New().String()
-	return
 }
