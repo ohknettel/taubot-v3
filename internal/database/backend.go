@@ -1,7 +1,6 @@
 package database
 
 import (
-	"slices"
 	"github.com/bwmarrin/discordgo"
 	"gorm.io/gorm"
 )
@@ -12,77 +11,94 @@ type Backend struct {
 	db *gorm.DB
 }
 
+type SessionedMember struct {
+	discordgo.Member
+	Session *discordgo.Session
+}
+
+type BackendError struct {
+	error
+	Message string
+}
+
+func (err BackendError) Error() string {
+	return err.Message
+}
+
 func NewBackend(database *gorm.DB) *Backend {
 	return &Backend{
 		db: database,
 	}
 }
 
+func EvaluatePrecedence(permission UserPermission) uint8 {
+	if permission.AccountID == nil && permission.EconomyID == nil {
+		return 1
+	} else if permission.AccountID == nil {
+		return 2
+	}
+	return 3
+}
+
 func (self *Backend) GetPermissions(member discordgo.Member) ([]UserPermission, error) {
 	var permissions []UserPermission
 
-	result := self.db.Where("user_id = ?", member.User.ID).Find(&permissions)
-	if err := result.Error; err != nil {
-		return nil, err
+	stmt := self.db.Where("user_id = ?", member.User.ID)
+	for _, role := range member.Roles {
+		stmt = stmt.Or("user_id = ?", role)
 	}
-	
+
+	if err := stmt.Find(&permissions).Error; err != nil {
+		return []UserPermission{}, err
+	}
+
 	return permissions, nil
 }
 
-func (self *Backend) HasPermissionsAny(member discordgo.Member, perms []uint8, model any) (bool, error) {
+func (self *Backend) HasPermission(member SessionedMember, permission uint8, account *Account, economy *Economy) (bool, error) {
 	var permissions []UserPermission
 	var err error
 
-	switch model := model.(type) {
-	case Economy:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("economy_id IS NOT NULL AND economy_id = ?", model.ID).Find(&permissions).Error
+	stmt := self.db.Where("permission_id = ?", permission).Where("user_id IN ?", append(member.Roles, member.User.ID))
 
-	case Account:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("account_id IS NOT NULL AND account_id = ?", model.ID).Find(&permissions).Error
-
-	default:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("account_id IS NULL AND economy_id IS NULL").Find(&permissions).Error
+	if account != nil {
+		stmt = stmt.Where("account_id = ?", account.ID)
 	}
 
-	if err != nil || len(permissions) == 0 {
+	if economy != nil {
+		stmt = stmt.Where("economy_id = ?", account.ID)
+	}
+
+	err = stmt.Find(&permissions).Error
+	if err != nil {
 		return false, err
+	} else if len(permissions) == 0 {
+		return false, nil
 	}
 
-	for _, permission := range permissions {
-		if slices.Contains(perms, permission.PermissionID) {
-			return true, nil
+	best := permissions[0]
+	for _, perm := range permissions {
+		if EvaluatePrecedence(best) > EvaluatePrecedence(perm) {
+			best = perm
+			continue
+		} else if EvaluatePrecedence(best) == EvaluatePrecedence(perm) {
+			if best.UserID == member.User.ID {
+				continue
+			} else if perm.UserID == member.User.ID {
+				best = perm
+			} else if member.Session != nil {
+				role_best, err_best := member.Session.State.Role(member.GuildID, best.UserID)
+				role_perm, err_perm := member.Session.State.Role(member.GuildID, perm.UserID)
+				if err_best != nil || err_perm != nil || role_best == nil || role_perm == nil {
+					continue
+				} else if role_best.Position < role_perm.Position {
+					best = perm
+				}
+			}
 		}
 	}
 
-	return false, nil
-}
-
-func (self *Backend) HasPermissionsAll(member discordgo.Member, perms []uint8, model any) (bool, error) {
-	var permissions []UserPermission
-	var err error
-
-	switch model := model.(type) {
-	case Economy:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("economy_id IS NOT NULL AND economy_id = ?", model.ID).Find(&permissions).Error
-
-	case Account:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("account_id IS NOT NULL AND account_id = ?", model.ID).Find(&permissions).Error
-
-	default:
-		err = self.db.Where("user_id = ?", member.User.ID).Where("account_id IS NULL AND economy_id IS NULL").Find(&permissions).Error
-	}
-
-	if err != nil || len(permissions) == 0 {
-		return false, err
-	}
-
-	for _, permission := range permissions {
-		if !slices.Contains(perms, permission.PermissionID) {
-			return false, nil
-		}
-	}
-
-	return true, nil
+	return best.Value, nil
 }
 
 func (self *Backend) GetEconomies() ([]Economy, error) {
@@ -121,7 +137,11 @@ func (self *Backend) GetEconomyByName(name string) (Economy, error) {
 	return economy, nil
 }
 
-func (self *Backend) RegisterGuild(guild discordgo.Guild, economy Economy) error {
+func (self *Backend) RegisterGuild(member SessionedMember, guild discordgo.Guild, economy Economy) error {
+	if perm, err := self.HasPermission(member, P_ManageEconomies, nil, &economy); err == nil && !perm {
+		return BackendError{Message: "You do not have the permission to register guilds to this economy."}
+	}
+
 	session := self.db.Begin()
 
 	var g Guild	
@@ -144,7 +164,11 @@ func (self *Backend) RegisterGuild(guild discordgo.Guild, economy Economy) error
 	return session.Commit().Error
 }
 
-func (self *Backend) UnregisterGuild(guild discordgo.Guild, economy Economy) error {
+func (self *Backend) UnregisterGuild(member SessionedMember, guild discordgo.Guild, economy Economy) error {
+	if perm, err := self.HasPermission(member, P_ManageEconomies, nil, &economy); err == nil && !perm {
+		return BackendError{Message: "You do not have the permission to unregister guilds from this economy."}
+	}
+
 	session := self.db.Begin()
 
 	var g Guild	
@@ -178,7 +202,11 @@ func (self *Backend) UnregisterGuildTx(session *gorm.DB, guild discordgo.Guild, 
 	return session.Commit().Error
 }
 
-func (self *Backend) CreateEconomy(economy *Economy) error {
+func (self *Backend) CreateEconomy(member SessionedMember, economy *Economy) error {
+	if perm, err := self.HasPermission(member, P_ManageEconomies, nil, nil); err == nil && !perm {
+		return BackendError{Message: "You do not have the permission to create economies."}
+	}
+
 	session := self.db.Begin()
 
 	err := session.Where("name = ?", economy.Name).FirstOrCreate(economy).Error
@@ -190,7 +218,11 @@ func (self *Backend) CreateEconomy(economy *Economy) error {
 	return session.Commit().Error
 }
 
-func (self *Backend) DeleteEconomy(economy *Economy) error {
+func (self *Backend) DeleteEconomy(member SessionedMember, economy *Economy) error {
+	if perm, err := self.HasPermission(member, P_ManageEconomies, nil, nil); err == nil && !perm {
+		return BackendError{Message: "You do not have the permission to delete economies."}
+	}
+
 	session := self.db.Begin()
 
 	err := session.Delete(economy).Error
