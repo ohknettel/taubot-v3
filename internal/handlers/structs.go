@@ -24,6 +24,15 @@ type Command struct {
 	DefaultPermissions *int64
 	Callback EventFunc
 	Subcommands []*Command
-	Options []*discordgo.ApplicationCommandOption
-	Autocomplete *map[string]EventFunc
+	Options []*Option
+}
+
+type Option struct {
+	Name string
+	Description string
+	Type any
+	Required bool
+	Autocomplete *EventFunc
+	Choices []*discordgo.ApplicationCommandOptionChoice
+	Options []*Option
 }
