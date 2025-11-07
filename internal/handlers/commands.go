@@ -102,16 +102,16 @@ func compact(command Command, target WithOptions) {
 	}
 }
 
-func find_cmd_from_options(command Command, options []*discordgo.ApplicationCommandInteractionDataOption) (Command, []*discordgo.ApplicationCommandInteractionDataOption) {
+func TraverseCommand(command Command, options []*discordgo.ApplicationCommandInteractionDataOption) (Command, []*discordgo.ApplicationCommandInteractionDataOption) {
 	var collected []*discordgo.ApplicationCommandInteractionDataOption
 	for _, option := range options {
 		switch option.Type {
 		case discordgo.ApplicationCommandOptionSubCommandGroup, discordgo.ApplicationCommandOptionSubCommand:
 			o_ind := slices.IndexFunc(command.Subcommands, func (s *Command) bool {return s.Name == option.Name})
 			if o_ind > -1 {
-				return find_cmd_from_options(*command.Subcommands[o_ind], option.Options)
+				return TraverseCommand(*command.Subcommands[o_ind], option.Options)
 			} else {
-				return find_cmd_from_options(command, option.Options)
+				return TraverseCommand(command, option.Options)
 			}
 
 		default:
